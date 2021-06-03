@@ -86,8 +86,9 @@ BAD_MESSAGE_FAILURE_CODES = ["MessageTooBig", "InvalidDataKey", "InvalidTtl"]
 
 DEFAULT_MAX_CONNECTIONS = 20
 
-
-class GcmPushkin(ConcurrencyLimitedPushkin):
+# Upfcm is the pushkin used for UnifiedPush FCM Embedded distrib
+# The only difference with GCM is the data format
+class UpfcmPushkin(ConcurrencyLimitedPushkin):
     """
     Pushkin that relays notifications to Google/Firebase Cloud Messaging.
     """
@@ -100,7 +101,7 @@ class GcmPushkin(ConcurrencyLimitedPushkin):
     } | ConcurrencyLimitedPushkin.UNDERSTOOD_CONFIG_FIELDS
 
     def __init__(self, name, sygnal, config, canonical_reg_id_store):
-        super(GcmPushkin, self).__init__(name, sygnal, config)
+        super(UpfcmPushkin, self).__init__(name, sygnal, config)
 
         nonunderstood = set(self.cfg.keys()).difference(self.UNDERSTOOD_CONFIG_FIELDS)
         if len(nonunderstood) > 0:
@@ -344,7 +345,7 @@ class GcmPushkin(ConcurrencyLimitedPushkin):
 
             inverse_reg_id_mappings = {v: k for (k, v) in reg_id_mappings.items()}
 
-            data = GcmPushkin._build_data(n, device)
+            data = UpfcmPushkin._build_data(n, device)
             headers = {
                 b"User-Agent": ["sygnal"],
                 b"Content-Type": ["application/json"],
@@ -361,7 +362,7 @@ class GcmPushkin(ConcurrencyLimitedPushkin):
             failed = []
 
             body = self.base_request_body.copy()
-            body["data"] = data
+            body["data"] = {"body":{"notification":data}, "instance":"default"}
             body["priority"] = "normal" if n.prio == "low" else "high"
 
             for retry_number in range(0, MAX_TRIES):
