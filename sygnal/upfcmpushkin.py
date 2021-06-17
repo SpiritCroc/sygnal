@@ -38,23 +38,23 @@ from .exceptions import PushkinSetupException
 from .notifications import ConcurrencyLimitedPushkin
 
 QUEUE_TIME_HISTOGRAM = Histogram(
-    "sygnal_gcm_queue_time", "Time taken waiting for a connection to GCM"
+    "sygnal_upfcm_queue_time", "Time taken waiting for a connection to GCM"
 )
 
 SEND_TIME_HISTOGRAM = Histogram(
-    "sygnal_gcm_request_time", "Time taken to send HTTP request to GCM"
+    "sygnal_upfcm_request_time", "Time taken to send HTTP request to GCM"
 )
 
 PENDING_REQUESTS_GAUGE = Gauge(
-    "sygnal_pending_gcm_requests", "Number of GCM requests waiting for a connection"
+    "sygnal_pending_upfcm_requests", "Number of GCM requests waiting for a connection"
 )
 
 ACTIVE_REQUESTS_GAUGE = Gauge(
-    "sygnal_active_gcm_requests", "Number of GCM requests in flight"
+    "sygnal_active_upfcm_requests", "Number of GCM requests in flight"
 )
 
 RESPONSE_STATUS_CODES_COUNTER = Counter(
-    "sygnal_gcm_status_codes",
+    "sygnal_upfcm_status_codes",
     "Number of HTTP response status codes received from GCM",
     labelnames=["pushkin", "code"],
 )
@@ -69,7 +69,7 @@ MAX_BYTES_PER_FIELD = 1024
 # The error codes that mean a registration ID will never
 # succeed and we should reject it upstream.
 # We include NotRegistered here too for good measure, even
-# though gcm-client 'helpfully' extracts these into a separate
+# though upfcm-client 'helpfully' extracts these into a separate
 # list.
 BAD_PUSHKEY_FAILURE_CODES = [
     "MissingRegistration",
@@ -226,7 +226,7 @@ class UpfcmPushkin(ConcurrencyLimitedPushkin):
                 b"retry-after", default=[]
             ):
                 retry_after = int(header_value)
-                span.log_kv({"event": "gcm_retry_after", "retry_after": retry_after})
+                span.log_kv({"event": "upfcm_retry_after", "retry_after": retry_after})
 
             raise TemporaryNotificationDispatchException(
                 "GCM server error, hopefully temporary.", custom_retry_delay=retry_after
@@ -268,7 +268,7 @@ class UpfcmPushkin(ConcurrencyLimitedPushkin):
                 )
                 span.log_kv(
                     {
-                        logs.EVENT: "gcm_response_mismatch",
+                        logs.EVENT: "upfcm_response_mismatch",
                         "num_devices": len(n.devices),
                         "num_results": len(resp_object["results"]),
                     }
@@ -277,7 +277,7 @@ class UpfcmPushkin(ConcurrencyLimitedPushkin):
             # determine which pushkeys to retry or forget about
             new_pushkeys = []
             for i, result in enumerate(resp_object["results"]):
-                span.set_tag("gcm_regid_updated", "registration_id" in result)
+                span.set_tag("upfcm_regid_updated", "registration_id" in result)
                 if "registration_id" in result:
                     await self.canonical_reg_id_store.set_canonical_id(
                         pushkeys[i], result["registration_id"]
@@ -286,7 +286,7 @@ class UpfcmPushkin(ConcurrencyLimitedPushkin):
                     log.warning(
                         "Error for pushkey %s: %s", pushkeys[i], result["error"]
                     )
-                    span.set_tag("gcm_error", result["error"])
+                    span.set_tag("upfcm_error", result["error"])
                     if result["error"] in BAD_PUSHKEY_FAILURE_CODES:
                         log.info(
                             "Reg ID %r has permanently failed with code %r: "
@@ -329,10 +329,10 @@ class UpfcmPushkin(ConcurrencyLimitedPushkin):
         # The pushkey is kind of secret because you can use it to send push
         # to someone.
         # span_tags = {"pushkeys": pushkeys}
-        span_tags = {"gcm_num_devices": len(pushkeys)}
+        span_tags = {"upfcm_num_devices": len(pushkeys)}
 
         with self.sygnal.tracer.start_span(
-            "gcm_dispatch", tags=span_tags, child_of=context.opentracing_span
+            "upfcm_dispatch", tags=span_tags, child_of=context.opentracing_span
         ) as span_parent:
             reg_id_mappings = await self.canonical_reg_id_store.get_canonical_ids(
                 pushkeys
@@ -354,7 +354,7 @@ class UpfcmPushkin(ConcurrencyLimitedPushkin):
 
             # count the number of remapped registration IDs in the request
             span_parent.set_tag(
-                "gcm_num_remapped_reg_ids_used",
+                "upfcm_num_remapped_reg_ids_used",
                 [k != v for (k, v) in reg_id_mappings.items()].count(True),
             )
 
@@ -379,7 +379,7 @@ class UpfcmPushkin(ConcurrencyLimitedPushkin):
                     span_tags = {"retry_num": retry_number}
 
                     with self.sygnal.tracer.start_span(
-                        "gcm_dispatch_try", tags=span_tags, child_of=span_parent
+                        "upfcm_dispatch_try", tags=span_tags, child_of=span_parent
                     ) as span:
                         new_failed, new_pushkeys = await self._request_dispatch(
                             n, log, body, headers, mapped_pushkeys, span
@@ -413,7 +413,7 @@ class UpfcmPushkin(ConcurrencyLimitedPushkin):
             if len(pushkeys) > 0:
                 log.info("Gave up retrying reg IDs: %r", pushkeys)
             # Count the number of failed devices.
-            span_parent.set_tag("gcm_num_failed", len(failed))
+            span_parent.set_tag("upfcm_num_failed", len(failed))
             return failed
 
     @staticmethod
@@ -464,7 +464,7 @@ class UpfcmPushkin(ConcurrencyLimitedPushkin):
 
 class CanonicalRegIdStore(object):
     TABLE_CREATE_QUERY = """
-        CREATE TABLE IF NOT EXISTS gcm_canonical_reg_id (
+        CREATE TABLE IF NOT EXISTS upfcm_canonical_reg_id (
             reg_id TEXT PRIMARY KEY,
             canonical_reg_id TEXT NOT NULL
         );
@@ -498,13 +498,13 @@ class CanonicalRegIdStore(object):
         """
         if self.engine == "sqlite":
             await self.db.runOperation(
-                "INSERT OR REPLACE INTO gcm_canonical_reg_id VALUES (?, ?);",
+                "INSERT OR REPLACE INTO upfcm_canonical_reg_id VALUES (?, ?);",
                 (reg_id, canonical_reg_id),
             )
         else:
             await self.db.runOperation(
                 """
-                INSERT INTO gcm_canonical_reg_id VALUES (%s, %s)
+                INSERT INTO upfcm_canonical_reg_id VALUES (%s, %s)
                 ON CONFLICT (reg_id) DO UPDATE
                     SET canonical_reg_id = EXCLUDED.canonical_reg_id;
                 """,
@@ -528,7 +528,7 @@ class CanonicalRegIdStore(object):
             await self.db.runQuery(
                 """
                 SELECT reg_id, canonical_reg_id
-                FROM gcm_canonical_reg_id
+                FROM upfcm_canonical_reg_id
                 WHERE reg_id IN (%s)
                 """
                 % (",".join(parameter_key for _ in reg_ids)),
